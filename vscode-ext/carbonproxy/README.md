@@ -1,71 +1,38 @@
-# carbonproxy README
+# CarbonProxy AI
 
-This is the README for your extension "carbonproxy". After writing up a brief description, we recommend including the following sections.
+CarbonProxy AI is a VS Code extension that adds a Copilot Chat participant `@carbonproxy` and command-based prompt optimization with CO₂/token tracking.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- `@carbonproxy` chat participant for optimized prompt handling
+- Prompt compression preview with `/optimize`
+- Session stats with `/stats` and reset with `/reset`
+- Semantic cache integration with cache-hit metrics
+- Command palette + editor context optimization command
+- Status bar CO₂ savings indicator
 
-For example if there is an image subfolder under your extension project workspace:
+## Commands
 
-\!\[feature X\]\(images/feature-x.png\)
+- `CarbonProxy: Optimize Selection`
+- `CarbonProxy: Open Web Dashboard`
+- `CarbonProxy: Reset Session Metrics`
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+Keyboard shortcut:
 
-## Requirements
+- macOS: `Cmd+Shift+E`
+- Windows/Linux: `Ctrl+Shift+E`
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## Configuration
 
-## Extension Settings
+- `carbonproxy.backendUrl` (default: `http://localhost:8080`)
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## Backend
 
-For example:
+The extension expects a backend exposing endpoints including:
 
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- `POST /api/optimize`
+- `POST /api/cache/check`
+- `POST /api/cache/store`
+- `GET /api/metrics`
+- `POST /api/demo/reset`
+- `GET /api/health`

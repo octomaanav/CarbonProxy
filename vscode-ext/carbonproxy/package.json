@@ -1,49 +1,102 @@
 {
   "name": "carbonproxy",
-  "displayName": "CarbonProxy",
-  "description": "Carbon-aware AI optimization layer",
+  "displayName": "CarbonProxy AI",
+  "description": "Carbon-aware AI — optimize prompts, track CO₂, use @carbonproxy in Copilot Chat",
   "version": "0.0.1",
+  "publisher": "carbonproxy-team",
   "engines": {
-    "vscode": "^1.109.0"
+    "vscode": "^1.90.0"
   },
-  "categories": [
-    "Other"
+  "extensionDependencies": [
+    "github.copilot-chat"
   ],
-  "activationEvents": [
-    "onStartupFinished",
-    "onCommand:carbonproxy.helloWorld"
-  ],
-  "main": "./dist/extension.js",
+  "categories": ["AI", "Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "icon": "media/ecostack-icon.png",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "carbonproxy.chat",
+        "name": "carbonproxy",
+        "fullName": "CarbonProxy AI",
+        "description": "Carbon-aware AI: compresses prompts, routes to efficient models, tracks CO₂",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "stats",
+            "description": "Show session CO₂ saved and token metrics"
+          },
+          {
+            "name": "optimize",
+            "description": "Preview prompt compression without calling LLM"
+          },
+          {
+            "name": "reset",
+            "description": "Reset session metrics to zero"
+          }
+        ]
+      }
+    ],
     "commands": [
       {
-        "command": "carbonproxy.helloWorld",
-        "title": "CarbonProxy: Hello World"
+        "command": "carbonproxy.optimize",
+        "title": "CarbonProxy: Optimize Selection"
+      },
+      {
+        "command": "carbonproxy.showDashboard",
+        "title": "CarbonProxy: Open Web Dashboard"
+      },
+      {
+        "command": "carbonproxy.resetSession",
+        "title": "CarbonProxy: Reset Session Metrics"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "carbonproxy.optimize",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "carbonproxy.optimize",
+          "when": "editorHasSelection",
+          "group": "carbonproxy@1"
+        }
+      ],
+      "commandPalette": [
+        { "command": "carbonproxy.optimize" },
+        { "command": "carbonproxy.showDashboard" },
+        { "command": "carbonproxy.resetSession" }
+      ]
+    },
+    "configuration": {
+      "title": "CarbonProxy",
+      "properties": {
+        "carbonproxy.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "URL of the CarbonProxy FastAPI backend"
+        }
+      }
+    }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
-    "compile": "webpack",
-    "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
-    "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out",
-    "pretest": "npm run compile-tests && npm run compile && npm run lint",
-    "lint": "eslint src",
-    "test": "vscode-test"
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.110.0",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "typescript-eslint": "^8.56.1",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "ts-loader": "^9.5.4",
-    "webpack": "^5.105.3",
-    "webpack-cli": "^6.0.1",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@types/vscode": "^1.90.0",
+    "@types/node": "20.x",
+    "typescript": "^5.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0"
   }
 }
