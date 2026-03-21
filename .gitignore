@@ -1,0 +1,31 @@
+# OS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build artifacts
+**/dist/
+**/out/
+*.vsix
+
+# Test/runtime artifacts
+coverage/
+.vscode-test/
+**/.vscode-test/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Misc
+*.tsbuildinfo
+**/tempCodeRunnerFile.ts
