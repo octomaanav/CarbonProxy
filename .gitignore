@@ -29,3 +29,11 @@ coverage/
 # Misc
 *.tsbuildinfo
 **/tempCodeRunnerFile.ts
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+**/*.pyc
+.pytest_cache/
+**/.pytest_cache/
