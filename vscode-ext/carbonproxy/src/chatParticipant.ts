@@ -41,6 +41,10 @@ async function handleRequest(
     return handlePreviewOptimize(prompt, stream);
   }
 
+  if (command === 'send') {
+    return handleOptimizeAndSendToCopilot(prompt, stream);
+  }
+
   return handleFullRequest(prompt, stream, token);
 }
 
@@ -122,6 +126,44 @@ Estimated CO₂ if sent: \`${(result.co2_g ?? 0).toFixed(5)}g\`
 
 *Run without \`/optimize\` to get the actual response.*
 `);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);
+  }
+}
+
+async function handleOptimizeAndSendToCopilot(
+  prompt: string,
+  stream: vscode.ChatResponseStream
+): Promise<void> {
+  if (!prompt.trim()) {
+    stream.markdown('Please provide a prompt. Example: `@carbonproxy /send explain JavaScript promises with examples`');
+    return;
+  }
+
+  stream.progress('Optimizing prompt for Copilot...');
+
+  try {
+    const result = await optimizePrompt(prompt);
+    const optimized = (result.optimized_prompt ?? prompt).trim();
+
+    await vscode.env.clipboard.writeText(optimized);
+
+    try {
+      await vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: optimized,
+      });
+    } catch {
+      await vscode.commands.executeCommand('workbench.action.chat.open');
+    }
+
+    stream.markdown(`**Optimized and sent to Copilot Chat**
+
+- Before: \`${result.tokens_before}\` tokens
+- After: \`${result.tokens_after}\` tokens
+- Savings: \`${result.savings_pct}%\`
+
+The optimized prompt was copied to your clipboard as a fallback.`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);

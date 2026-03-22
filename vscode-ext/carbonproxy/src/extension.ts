@@ -3,6 +3,7 @@ import { initStatusBar } from './statusBar';
 import { registerChatParticipant } from './chatParticipant';
 import {
 	handleOptimizeCommand,
+	handleOptimizeForCopilot,
 	handleShowDashboard,
 	handleResetSession,
 } from './commands';
@@ -17,6 +18,10 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand(
 			'carbonproxy.optimize',
 			handleOptimizeCommand
+		),
+		vscode.commands.registerCommand(
+			'carbonproxy.optimizeForCopilot',
+			handleOptimizeForCopilot
 		),
 		vscode.commands.registerCommand(
 			'carbonproxy.showDashboard',

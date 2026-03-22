@@ -32,6 +32,10 @@
             "description": "Preview prompt compression without calling LLM"
           },
           {
+            "name": "send",
+            "description": "Optimize prompt and open Copilot Chat with optimized text"
+          },
+          {
             "name": "reset",
             "description": "Reset session metrics to zero"
           }
@@ -42,6 +46,10 @@
       {
         "command": "carbonproxy.optimize",
         "title": "CarbonProxy: Optimize Selection"
+      },
+      {
+        "command": "carbonproxy.optimizeForCopilot",
+        "title": "CarbonProxy: Optimize Prompt for Copilot"
       },
       {
         "command": "carbonproxy.showDashboard",
@@ -66,10 +74,16 @@
           "command": "carbonproxy.optimize",
           "when": "editorHasSelection",
           "group": "carbonproxy@1"
+        },
+        {
+          "command": "carbonproxy.optimizeForCopilot",
+          "when": "editorHasSelection",
+          "group": "carbonproxy@2"
         }
       ],
       "commandPalette": [
         { "command": "carbonproxy.optimize" },
+        { "command": "carbonproxy.optimizeForCopilot" },
         { "command": "carbonproxy.showDashboard" },
         { "command": "carbonproxy.resetSession" }
       ]
