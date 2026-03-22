@@ -472,7 +472,7 @@ footer {
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const API = 'http://localhost:8000';
+const API = 'http://localhost:8080';
 let sessionChart = null;
 
 /* ── MOCK DATA (used when API is unreachable) ─────────────── */
@@ -610,6 +610,8 @@ function renderChunks(chunks) {
   el.innerHTML = chunks.slice(0, 10).map(c => `
     <div class="chunk-item">
       <div class="chunk-summary">${c.summary}</div>
+      ${c.original_prompt ? `<div style="margin-top:8px;font-size:11px;color:var(--text2)"><strong>Original:</strong> ${c.original_prompt}</div>` : ''}
+      ${c.optimized_prompt ? `<div style="margin-top:4px;font-size:11px;color:var(--green)"><strong>Optimized:</strong> ${c.optimized_prompt}</div>` : ''}
       <div class="chunk-meta-row">
         <span style="color:var(--blue)">${c.session_id.slice(-6)}</span>
         <span>${c.tokens} tokens</span>
