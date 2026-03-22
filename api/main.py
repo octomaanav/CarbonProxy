@@ -1,4 +1,13 @@
-from fastapi import FastAPI
+import sys
+import os
+import json
+import hashlib
+from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.responses import JSONResponse
@@ -6,10 +15,36 @@ from fastapi.responses import JSONResponse
 from engine import CarbonProxyEngine
 from demo_seed import SEED_DATA
 
+from ecostack.memory_store import (
+    init_db, get_conn, get_chunks, append_chunk,
+    chunk_exists, delete_session, log_carbon, get_total_chunks,
+)
+from ecostack.embeddings import embed_query, embed_document
+from ecostack.similarity import find_relevant_chunks
+from ecostack.summarizer import summarize_exchange
+from ecostack.carbon import estimate_carbon
+from ecostack.models import (
+    InjectRequest, InjectResponse,
+    SaveRequest, SaveResponse,
+    SessionStats, DashboardResponse, DashboardSummary,
+    SessionRow, RecentChunk, CarbonSummary,
+    DeleteResponse, HealthResponse,
+)
+
+# ── App ───────────────────────────────────────────────────────
 
 app = FastAPI(title="CarbonProxy API", version="0.2.0")
 engine = CarbonProxyEngine()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── Existing request models ──────────────────────────────────
 
 class OptimizeRequest(BaseModel):
     prompt: str
@@ -33,14 +68,21 @@ class CacheStoreRequest(BaseModel):
     response: str
 
 
+# ── Startup ───────────────────────────────────────────────────
+
 @app.on_event("startup")
-def startup_seed_cache() -> None:
+def startup() -> None:
+    init_db()
     if SEED_DATA:
         engine.warm_cache(SEED_DATA)
 
 
+# ══════════════════════════════════════════════════════════════
+# EXISTING ROUTES (engine / cache)
+# ══════════════════════════════════════════════════════════════
+
 @app.get("/api/health")
-def health() -> dict:
+def api_health() -> dict:
     return {
         "status": "ok",
         "cache": engine.cache_stats(),
@@ -123,3 +165,254 @@ def metrics() -> dict:
 def demo_reset() -> dict:
     engine.reset_all()
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════
+# MEMORY LAYER ROUTES
+# ══════════════════════════════════════════════════════════════
+
+@app.post("/memory/inject", response_model=InjectResponse)
+def memory_inject(body: InjectRequest) -> InjectResponse:
+    """Embed prompt, find relevant stored chunks, return injection context."""
+    chunks = get_chunks(body.session_id)
+
+    # No chunks yet — skip embedding (saves money)
+    if not chunks:
+        return InjectResponse(
+            injected_context="",
+            chunks_used=0,
+            chunks_available=0,
+            tokens_injected=0,
+            tokens_saved=0,
+            relevant_summaries=[],
+        )
+
+    query_emb = embed_query(body.prompt)
+    if query_emb is None:
+        # Embedding failed — return empty injection, don't crash
+        return InjectResponse(
+            injected_context="",
+            chunks_used=0,
+            chunks_available=len(chunks),
+            tokens_injected=0,
+            tokens_saved=0,
+            relevant_summaries=[],
+        )
+
+    relevant = find_relevant_chunks(query_emb, chunks)
+
+    injected_context = "\n".join(f"[Memory] {c['summary']}" for c in relevant)
+    tokens_injected = sum(c["tokens"] for c in relevant)
+    total_session_tokens = sum(c["tokens"] for c in chunks)
+    tokens_saved = max(0, total_session_tokens - tokens_injected)
+
+    return InjectResponse(
+        injected_context=injected_context,
+        chunks_used=len(relevant),
+        chunks_available=len(chunks),
+        tokens_injected=tokens_injected,
+        tokens_saved=tokens_saved,
+        relevant_summaries=[c["summary"] for c in relevant],
+    )
+
+
+def _save_background(
+    session_id: str,
+    prompt: str,
+    response: str,
+    model: str,
+    tokens_sent: int,
+    tokens_saved: int,
+) -> dict:
+    """Background task: summarize, embed, store chunk, log carbon."""
+    summary = summarize_exchange(prompt, response)
+
+    if chunk_exists(session_id, summary):
+        return {
+            "status": "duplicate_skipped",
+            "summary": summary,
+            "id": hashlib.md5(summary.encode()).hexdigest()[:8],
+            "tokens": len(summary.split()),
+        }
+
+    embedding = embed_document(summary)
+    if embedding is None:
+        # Can't store without embedding — log and skip
+        print(f"[memory/save] Embedding failed for session {session_id}, skipping")
+        return {
+            "status": "embedding_failed",
+            "summary": summary,
+            "id": "",
+            "tokens": 0,
+        }
+
+    chunk_id = hashlib.md5(summary.encode()).hexdigest()[:8]
+    token_count = len(summary.split())
+
+    chunk = {
+        "id": chunk_id,
+        "summary": summary,
+        "embedding": embedding,
+        "tokens": token_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        append_chunk(session_id, chunk)
+    except Exception as e:
+        print(f"[memory/save] SQLite write failed: {e}")
+
+    # Carbon logging
+    try:
+        co2_consumed, co2_avoided = estimate_carbon(model, tokens_sent, tokens_saved)
+        log_carbon(
+            session_id=session_id,
+            model=model,
+            tokens_sent=tokens_sent,
+            tokens_saved=tokens_saved,
+            co2_consumed=co2_consumed,
+            co2_avoided=co2_avoided,
+        )
+    except Exception as e:
+        print(f"[memory/save] Carbon log failed: {e}")
+
+    return {
+        "status": "saved",
+        "summary": summary,
+        "id": chunk_id,
+        "tokens": token_count,
+    }
+
+
+@app.post("/memory/save", response_model=SaveResponse)
+def memory_save(body: SaveRequest, background_tasks: BackgroundTasks) -> SaveResponse:
+    """Summarize exchange, embed, store chunk + carbon log (non-blocking)."""
+    # Run synchronously for now so we can return the result.
+    # The Gemini calls are I/O-bound but short (~200ms).
+    # For true fire-and-forget, swap to background_tasks.add_task().
+    result = _save_background(
+        session_id=body.session_id,
+        prompt=body.prompt,
+        response=body.response,
+        model=body.model,
+        tokens_sent=body.tokens_sent,
+        tokens_saved=body.tokens_saved,
+    )
+    return SaveResponse(**result)
+
+
+@app.get("/memory/stats/{session_id}", response_model=SessionStats)
+def memory_stats(session_id: str) -> SessionStats:
+    """Per-session stats for dashboard."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM memory_chunks WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,)
+        ).fetchall()
+
+    chunks = [dict(r) for r in rows]
+    return SessionStats(
+        session_id=session_id,
+        total_chunks=len(chunks),
+        total_tokens_stored=sum(c["tokens"] for c in chunks),
+        recent_summaries=[c["summary"] for c in chunks[-5:]],
+        oldest_chunk=chunks[0]["timestamp"] if chunks else None,
+        newest_chunk=chunks[-1]["timestamp"] if chunks else None,
+    )
+
+
+@app.get("/memory/dashboard", response_model=DashboardResponse)
+def memory_dashboard() -> DashboardResponse:
+    """Aggregate stats across ALL sessions — polled every 5s by dashboard."""
+    with get_conn() as conn:
+        # Recent chunks
+        all_chunks = conn.execute("""
+            SELECT session_id, summary, tokens, timestamp
+            FROM memory_chunks
+            ORDER BY timestamp DESC
+        """).fetchall()
+
+        # Per-session stats
+        sessions = conn.execute("""
+            SELECT
+                session_id,
+                COUNT(*)         AS chunk_count,
+                SUM(tokens)      AS tokens_stored,
+                MIN(timestamp)   AS first_seen,
+                MAX(timestamp)   AS last_seen
+            FROM memory_chunks
+            GROUP BY session_id
+            ORDER BY last_seen DESC
+        """).fetchall()
+
+        # Totals
+        totals = conn.execute("""
+            SELECT COUNT(*) as total_chunks, COALESCE(SUM(tokens), 0) as total_tokens
+            FROM memory_chunks
+        """).fetchone()
+
+        # Carbon totals from carbon_log
+        carbon = conn.execute("""
+            SELECT
+                COALESCE(SUM(co2_consumed), 0) AS total_consumed,
+                COALESCE(SUM(co2_avoided), 0)  AS total_avoided,
+                COALESCE(SUM(tokens_saved), 0) AS total_tokens_saved
+            FROM carbon_log
+        """).fetchone()
+
+    total_consumed = carbon["total_consumed"]
+    total_avoided = carbon["total_avoided"]
+    total_either = total_consumed + total_avoided
+    savings_pct = round((total_avoided / total_either * 100) if total_either > 0 else 0.0, 2)
+
+    return DashboardResponse(
+        summary=DashboardSummary(
+            total_sessions=len(sessions),
+            total_chunks=totals["total_chunks"],
+            tokens_saved=carbon["total_tokens_saved"],
+            co2_avoided_g=round(total_avoided, 4),
+        ),
+        sessions=[
+            SessionRow(
+                session_id=s["session_id"],
+                chunk_count=s["chunk_count"],
+                tokens_stored=s["tokens_stored"],
+                first_seen=s["first_seen"],
+                last_seen=s["last_seen"],
+            )
+            for s in sessions
+        ],
+        recent_chunks=[
+            RecentChunk(
+                session_id=c["session_id"],
+                summary=c["summary"],
+                tokens=c["tokens"],
+                timestamp=c["timestamp"],
+            )
+            for c in all_chunks[:20]
+        ],
+        carbon_summary=CarbonSummary(
+            total_co2_consumed_g=round(total_consumed, 4),
+            total_co2_avoided_g=round(total_avoided, 4),
+            savings_pct=savings_pct,
+        ),
+    )
+
+
+@app.delete("/memory/session/{session_id}", response_model=DeleteResponse)
+def memory_delete_session(session_id: str) -> DeleteResponse:
+    """Demo reset — wipe one session's memory."""
+    deleted = delete_session(session_id)
+    return DeleteResponse(deleted_chunks=deleted, session_id=session_id)
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    """Liveness check for dashboard status indicator."""
+    try:
+        total = get_total_chunks()
+        db_status = "connected"
+    except Exception:
+        total = 0
+        db_status = "error"
+    return HealthResponse(status="ok", db=db_status, chunks_total=total)
