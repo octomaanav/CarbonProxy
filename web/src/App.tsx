@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Leaf, Cpu, Zap, Bot, RotateCcw, Activity,
   TrendingDown, Coins, BatteryCharging, Users,
+  TreePine, Home, Send, ArrowRight, Sparkles,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -19,6 +21,7 @@ interface DashboardSummary {
   cache_hits: number;
   cache_hit_rate: number;
   co2_equivalent: string;
+  trees_saved: number;
 }
 
 interface EnergyData {
@@ -55,6 +58,15 @@ interface DashboardData {
   model_distribution: ModelDist[];
   timeline: TimelineItem[];
   recent_activity: ActivityItem[];
+}
+
+interface OptimizeResult {
+  tokens_before: number;
+  tokens_after: number;
+  savings_pct: number;
+  model: string;
+  co2_g: number;
+  optimized_prompt: string;
 }
 
 const API = 'http://localhost:8080';
@@ -104,9 +116,119 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-/* ── Component ──────────────────────────────────────────────────────── */
+/* ── Interactive Prompt Tester ──────────────────────────────────────── */
 
-export default function App() {
+function PromptTester({ onOptimized }: { onOptimized: () => void }) {
+  const [prompt, setPrompt] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<OptimizeResult | null>(null);
+
+  const handleSubmit = async () => {
+    if (!prompt.trim() || loading) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await fetch(`${API}/api/optimize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setResult(data);
+        onOptimized();
+      }
+    } catch { /* silent */ }
+    setLoading(false);
+  };
+
+  return (
+    <div className="card p-5 animate-in animate-delay-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Sparkles className="w-4 h-4 text-emerald-400" />
+        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Try It — Live Prompt Optimizer</h3>
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        <input
+          type="text"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+          placeholder="Type a prompt to optimize..."
+          className="flex-1 px-4 py-3 rounded-xl bg-zinc-900/60 border border-zinc-800
+                     text-sm text-zinc-200 placeholder:text-zinc-600
+                     focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20
+                     transition-all"
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={loading || !prompt.trim()}
+          className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold
+                     bg-emerald-500/10 text-emerald-400 border border-emerald-500/20
+                     hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed
+                     transition-all"
+        >
+          {loading ? (
+            <div className="w-4 h-4 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+          Optimize
+        </button>
+      </div>
+
+      {result && (
+        <div className="bg-zinc-900/40 rounded-xl border border-zinc-800/50 p-4 space-y-3 animate-in">
+          {/* Token comparison bar */}
+          <div>
+            <div className="flex justify-between text-[11px] text-zinc-500 mb-1.5">
+              <span>Token Compression</span>
+              <span className="text-emerald-400 font-semibold">−{result.savings_pct}%</span>
+            </div>
+            <div className="flex gap-2 items-center">
+              <div className="flex-1 relative h-6 rounded-lg overflow-hidden bg-zinc-800/60">
+                <div className="absolute inset-y-0 left-0 bg-red-500/20 border-r border-red-400/30 flex items-center px-2"
+                     style={{ width: '100%' }}>
+                  <span className="text-[10px] font-mono text-red-300">{result.tokens_before} tokens</span>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-zinc-600 shrink-0" />
+              <div className="flex-1 relative h-6 rounded-lg overflow-hidden bg-zinc-800/60">
+                <div className="absolute inset-y-0 left-0 bg-emerald-500/20 border-r border-emerald-400/30 flex items-center px-2"
+                     style={{ width: `${Math.max(20, ((result.tokens_after / result.tokens_before) * 100))}%` }}>
+                  <span className="text-[10px] font-mono text-emerald-300">{result.tokens_after} tokens</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats row */}
+          <div className="flex gap-4 pt-1">
+            <div>
+              <span className="text-[10px] text-zinc-600 uppercase">Model</span>
+              <p className="text-xs font-medium" style={{ color: MODEL_COLORS[result.model] || '#71717a' }}>
+                {result.model}
+              </p>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-600 uppercase">CO₂</span>
+              <p className="text-xs font-mono font-medium text-zinc-300">{result.co2_g.toFixed(6)}g</p>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-600 uppercase">Optimized</span>
+              <p className="text-xs text-zinc-400 truncate max-w-[260px]">{result.optimized_prompt}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Dashboard Component ────────────────────────────────────────────── */
+
+export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [connected, setConnected] = useState(true);
 
@@ -159,6 +281,10 @@ export default function App() {
   const s = data?.summary;
   const e = data?.energy;
 
+  // Trees saved
+  const treesSaved = s?.trees_saved ?? 0;
+  const treePercent = Math.min(treesSaved * 100, 100); // visual fill of 1 tree
+
   // Chart data
   const timelineData = (data?.timeline ?? []).map((t, i) => ({
     idx: i + 1,
@@ -179,6 +305,10 @@ export default function App() {
         {/* ── Navbar ─────────────────────────────────────────────────── */}
         <nav className="flex items-center justify-between py-3 animate-in">
           <div className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-2 text-zinc-500 hover:text-zinc-300 transition-colors mr-2"
+                  title="Back to Home">
+              <Home className="w-4 h-4" />
+            </Link>
             <div className="relative w-9 h-9 flex items-center justify-center">
               <Leaf className="w-5 h-5 text-emerald-400 absolute" />
               <Cpu className="w-4 h-4 text-emerald-600 absolute translate-x-1.5 translate-y-1.5" />
@@ -230,6 +360,25 @@ export default function App() {
             <p className="text-sm text-zinc-500">
               {s?.co2_saved_g?.toFixed(6) ?? '0'}g CO₂ saved across {s?.requests ?? 0} proxy requests
             </p>
+          </div>
+
+          {/* Trees saved widget */}
+          <div className="flex flex-col items-center gap-2 shrink-0 px-4">
+            <div className="relative w-16 h-16">
+              {/* Background circle */}
+              <svg viewBox="0 0 64 64" className="w-full h-full -rotate-90">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(52,211,153,0.1)" strokeWidth="4" />
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#34d399" strokeWidth="4"
+                        strokeDasharray={`${treePercent * 1.76} 176`}
+                        strokeLinecap="round" className="transition-all duration-700" />
+              </svg>
+              <TreePine className="w-6 h-6 text-emerald-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 tree-sway" />
+            </div>
+            <div className="text-center">
+              <p className="counter-value text-lg text-white">{treesSaved.toFixed(6)}</p>
+              <p className="text-[10px] text-zinc-600 uppercase tracking-wider">Trees saved</p>
+              <p className="text-[9px] text-zinc-700 mt-0.5">~22kg CO₂/tree/year</p>
+            </div>
           </div>
         </section>
 
@@ -460,6 +609,9 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* ── Interactive Prompt Tester ───────────────────────────────── */}
+        <PromptTester onOptimized={fetchDashboard} />
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
         <footer className="text-center py-4 text-[11px] text-zinc-700">

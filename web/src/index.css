@@ -178,3 +178,47 @@
   border-radius: 12px !important;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4) !important;
 }
+
+/* ── Scroll-reveal (Landing page) ─────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+}
+.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Tree sway animation ──────────────────────────────────────────────── */
+@keyframes tree-sway {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(3deg); }
+  75% { transform: rotate(-3deg); }
+}
+.tree-sway {
+  animation: tree-sway 4s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+/* ── Step icon hover ──────────────────────────────────────────────────── */
+.step-icon {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.step-icon:hover {
+  transform: scale(1.05) translateY(-4px);
+  box-shadow: 0 12px 40px rgba(52, 211, 153, 0.1);
+}
+
+/* ── Smooth scrolling ─────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Spinner animation ────────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+}
