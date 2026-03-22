@@ -1,6 +1,4 @@
-from main import state, CacheRecord
-
-seed = [
+SEED_DATA = [
     (
         "explain the difference between REST and GraphQL APIs",
         "REST uses multiple endpoints and fixed resource shapes. GraphQL uses a single endpoint and client-defined queries, reducing over/under-fetching.",
@@ -11,7 +9,14 @@ seed = [
     ),
 ]
 
-for prompt, response in seed:
-    state.cache.append(CacheRecord(prompt=prompt, response=response))
 
-print(f"Seeded {len(seed)} cache items")
+def seed_engine(engine) -> None:
+    if SEED_DATA:
+        engine.warm_cache(SEED_DATA)
+
+
+if __name__ == "__main__":
+    from engine import CarbonProxyEngine
+
+    seed_engine(CarbonProxyEngine())
+    print(f"Seeded {len(SEED_DATA)} cache items")
