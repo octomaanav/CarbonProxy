@@ -5,9 +5,7 @@ CarbonProxy AI is a VS Code extension that adds a Copilot Chat participant `@car
 ## Features
 
 - `@carbonproxy` chat participant for optimized prompt handling
-- Prompt compression preview with `/optimize`
-- Optimize and forward to Copilot Chat with `/send`
-- Full memory-backed chat via `/api/chat` (each prompt/response persisted per project session)
+- Automatic prompt compression and memory persistence (each prompt/response saved per project session)
 - Session stats with `/stats` and reset with `/reset`
 - Semantic cache integration with cache-hit metrics
 - Command palette + editor context optimization command
@@ -20,24 +18,12 @@ CarbonProxy AI is a VS Code extension that adds a Copilot Chat participant `@car
 - `CarbonProxy: Open Web Dashboard`
 - `CarbonProxy: Reset Session Metrics`
 
-### Optimize before sending to Copilot
+### Available Commands
 
-Use `CarbonProxy: Optimize Prompt for Copilot` from the Command Palette.
+- `/stats` — show session statistics (tokens saved, CO₂ avoided, cache hit rate)
+- `/reset` — reset session metrics to zero
 
-It will:
-
-1. Ask for your prompt (prefills editor selection if any)
-2. Run prompt optimization via the CarbonProxy backend
-3. Offer actions:
-	- Send to Copilot Chat
-	- Copy optimized prompt
-	- Replace selected text
-	- Preview optimization
-
-Keyboard shortcut:
-
-- macOS: `Cmd+Shift+E`
-- Windows/Linux: `Ctrl+Shift+E`
+Use: `@carbonproxy /stats` or `@carbonproxy /reset`
 
 ## Configuration
 
@@ -55,7 +41,13 @@ The extension expects a backend exposing endpoints including:
 - `POST /api/demo/reset`
 - `GET /api/health`
 
-## Copilot Chat flow
+## Usage
 
-- `@carbonproxy /optimize <your prompt>` → shows compression preview
-- `@carbonproxy /send <your prompt>` → runs `/api/chat` (memory inject + save), then opens Copilot Chat with optimized text
+Simply use `@carbonproxy <your prompt>` to:
+- Automatically optimize (compress) your prompt
+- Get an AI response
+- Persist the interaction to your project's memory database
+
+Example: `@carbonproxy explain how to implement binary search in Python`
+
+All prompts are automatically optimized and saved per project session for context reuse.
