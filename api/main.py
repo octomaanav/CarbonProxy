@@ -168,6 +168,120 @@ def demo_reset() -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
+# UNIFIED CHAT — full pipeline with auto memory + model routing
+# ══════════════════════════════════════════════════════════════
+
+class ChatRequest(BaseModel):
+    session_id: str = "default"
+    prompt: str
+
+
+@app.post("/api/chat")
+def chat(body: ChatRequest) -> dict:
+    """Full EcoStack pipeline: inject memory → compress → route → call Gemini → save memory.
+
+    Just send { "session_id": "...", "prompt": "..." } and everything is automatic.
+    """
+    original_prompt = body.prompt
+
+    # ── Step 1: Inject relevant memory context ────────────────
+    memory_info = {"chunks_used": 0, "chunks_available": 0,
+                   "tokens_injected": 0, "tokens_saved": 0,
+                   "relevant_summaries": [], "injected_context": ""}
+
+    chunks = get_chunks(body.session_id)
+    if chunks:
+        query_emb = embed_query(body.prompt)
+        if query_emb is not None:
+            relevant = find_relevant_chunks(query_emb, chunks)
+            injected_context = "\n".join(f"[Memory] {c['summary']}" for c in relevant)
+            tokens_injected = sum(c["tokens"] for c in relevant)
+            total_session_tokens = sum(c["tokens"] for c in chunks)
+
+            memory_info = {
+                "chunks_used": len(relevant),
+                "chunks_available": len(chunks),
+                "tokens_injected": tokens_injected,
+                "tokens_saved": max(0, total_session_tokens - tokens_injected),
+                "relevant_summaries": [c["summary"] for c in relevant],
+                "injected_context": injected_context,
+            }
+
+    # Prepend memory context to the prompt if we have any
+    enriched_prompt = body.prompt
+    if memory_info["injected_context"]:
+        enriched_prompt = memory_info["injected_context"] + "\n\n" + body.prompt
+
+    # ── Step 2: Run through engine (compress → route → call) ──
+    try:
+        result = engine.complete(prompt=enriched_prompt)
+    except Exception as err:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "engine_failed",
+                "message": str(err),
+                "original_prompt": original_prompt,
+            },
+        )
+
+    response_text = result.get("response", "")
+    model_used = result.get("model", "unknown")
+    tokens_before = result.get("tokens_before", 0)
+    tokens_after = result.get("tokens_after", 0)
+    tokens_saved_by_compression = max(0, tokens_before - tokens_after)
+
+    # ── Step 3: Save exchange to memory (non-blocking) ────────
+    save_result = {"status": "skipped", "summary": "", "id": "", "tokens": 0}
+    if response_text.strip():
+        try:
+            save_result = _save_background(
+                session_id=body.session_id,
+                prompt=original_prompt,
+                response=response_text,
+                model=model_used,
+                tokens_sent=tokens_after,
+                tokens_saved=tokens_saved_by_compression + memory_info["tokens_saved"],
+            )
+        except Exception as e:
+            print(f"[chat] Memory save failed: {e}")
+
+    return {
+        # ── Response ──
+        "response": response_text,
+        "original_prompt": original_prompt,
+
+        # ── Model routing ──
+        "model": model_used,
+        "provider": result.get("provider", "unknown"),
+        "intent": result.get("intent", "default"),
+        "route_reason": result.get("route_reason", ""),
+
+        # ── Compression stats ──
+        "tokens_before": tokens_before,
+        "tokens_after": tokens_after,
+        "savings_pct": result.get("savings_pct", 0),
+        "compressed_prompt": result.get("compressed_prompt", enriched_prompt),
+
+        # ── Memory layer stats ──
+        "memory": {
+            "chunks_used": memory_info["chunks_used"],
+            "chunks_available": memory_info["chunks_available"],
+            "tokens_injected": memory_info["tokens_injected"],
+            "tokens_saved_by_memory": memory_info["tokens_saved"],
+            "relevant_summaries": memory_info["relevant_summaries"],
+            "saved_chunk": save_result,
+        },
+
+        # ── Carbon + cost ──
+        "co2_g": result.get("co2_g", 0.0),
+        "carbon_saved_g": result.get("carbon_saved_g", 0.0),
+        "money_saved_usd": result.get("money_saved_usd", 0.0),
+        "cache_hit": result.get("cache_hit", False),
+    }
+
+
+
 # MEMORY LAYER ROUTES
 # ══════════════════════════════════════════════════════════════
 
@@ -252,6 +366,8 @@ def _save_background(
     chunk = {
         "id": chunk_id,
         "summary": summary,
+        "prompt": prompt,
+        "response": response,
         "embedding": embedding,
         "tokens": token_count,
         "timestamp": datetime.now(timezone.utc).isoformat(),

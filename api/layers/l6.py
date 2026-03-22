@@ -18,18 +18,17 @@ OUTPUT_CONSTRAINTS = {
 }
 
 
-def get_max_tokens(intent: str, output_format: str = None) -> int:
-    base = MAX_TOKENS_BY_INTENT.get(intent, MAX_TOKENS_BY_INTENT["default"])
-    
-    # Structured output formats need more room to complete properly
+def get_max_tokens(intent: str, output_format: str = None) -> int | None:
+    # When a specific output format is requested, cap tokens to keep it tight
     if output_format == "bullets":
-        return max(base, 1200)  # Bullets need substantial space for 3-5 complete points
+        return 1200
     elif output_format == "json":
-        return max(base, 800)  # JSON needs structure + data
+        return 800
     elif output_format == "code":
-        return max(base, 1500)  # Code often needs more space
-    
-    return base
+        return 1500
+
+    # No format specified → let the model decide its own length (no truncation)
+    return None
 
 
 def build_structured_prompt(

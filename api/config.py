@@ -48,12 +48,12 @@ DEFAULT_ROLLING_WINDOW = 10
 SUMMARIZE_THRESHOLD_TOKENS = 2000
 
 MAX_TOKENS_BY_INTENT = {
-    "simple_qa": 200,
-    "code_gen": 1000,
-    "code_review": 600,
-    "analysis": 800,
-    "creative": 1500,
-    "default": 500,
+    "simple_qa": 500,
+    "code_gen": 2000,
+    "code_review": 1200,
+    "analysis": 1500,
+    "creative": 2000,
+    "default": 800,
 }
 
 ROUTE_FLASH_MAX_TOKENS = 600

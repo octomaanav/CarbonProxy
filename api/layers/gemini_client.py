@@ -18,7 +18,7 @@ def call(
     prompt: str,
     model: str = MODEL_FLASH,
     system: str = None,
-    max_tokens: int = 500,
+    max_tokens: int | None = None,
     temperature: float = 0.7,
     retries: int = 3,
 ) -> str:
@@ -29,18 +29,20 @@ def call(
         prompt:      user prompt text
         model:       model name — use MODEL_FLASH for almost everything
         system:      system instruction string
-        max_tokens:  max output tokens
+        max_tokens:  max output tokens (None = let the model decide)
         temperature: 0.0 = deterministic, 1.0 = creative
         retries:     retry attempts on 429 rate limit errors
 
     Returns:
         response text as string
     """
-    gen_config = types.GenerateContentConfig(
-        max_output_tokens=max_tokens,
-        temperature=temperature,
-        system_instruction=system if system else None,
-    )
+    config_kwargs = {"temperature": temperature}
+    if system:
+        config_kwargs["system_instruction"] = system
+    if max_tokens is not None:
+        config_kwargs["max_output_tokens"] = max_tokens
+
+    gen_config = types.GenerateContentConfig(**config_kwargs)
 
     for attempt in range(retries):
         try:
@@ -75,7 +77,7 @@ def call_with_history(
     messages: list,
     model: str = MODEL_FLASH,
     system: str = None,
-    max_tokens: int = 500,
+    max_tokens: int | None = None,
     temperature: float = 0.3,
 ) -> str:
     """
