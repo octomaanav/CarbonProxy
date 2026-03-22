@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
-import { optimizePrompt, chatWithMemory, getMetrics, resetBackendSession } from './api';
+import { chatWithMemory, getMetrics, resetBackendSession } from './api';
 import { buildMetricsTable, estimateTokens, co2ToEquivalent } from './metrics';
 import { recordMetric, resetSession, session } from './session';
 import { refreshStatusBar } from './statusBar';
@@ -36,14 +36,6 @@ async function handleRequest(
 
   if (command === 'reset') {
     return handleResetCommand(stream);
-  }
-
-  if (command === 'optimize') {
-    return handlePreviewOptimize(prompt, stream);
-  }
-
-  if (command === 'send') {
-    return handleOptimizeAndSendToCopilot(prompt, stream);
   }
 
   return handleFullRequest(prompt, stream, token);
@@ -95,82 +87,6 @@ async function handleResetCommand(
   resetSession();
   void refreshStatusBar();
   stream.markdown('Session metrics have been reset to zero. Ready for a fresh demo.');
-}
-
-async function handlePreviewOptimize(
-  prompt: string,
-  stream: vscode.ChatResponseStream
-): Promise<void> {
-  if (!prompt.trim()) {
-    stream.markdown('Please provide a prompt to preview. Example: `@carbonproxy /optimize explain how TCP works`');
-    return;
-  }
-
-  stream.progress('Compressing prompt...');
-
-  try {
-    const result = await optimizePrompt(prompt);
-    stream.markdown(`**Prompt compression preview**
-
-**Before** (${result.tokens_before} tokens):
-\`\`\`
-${result.original_prompt}
-\`\`\`
-
-**After** (${result.tokens_after} tokens — ${result.savings_pct}% smaller):
-\`\`\`
-${result.optimized_prompt}
-\`\`\`
-
-Model that would be selected: \`${result.model}\`
-Estimated CO₂ if sent: \`${(result.co2_g ?? 0).toFixed(5)}g\`
-
-*Run without \`/optimize\` to get the actual response.*
-`);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);
-  }
-}
-
-async function handleOptimizeAndSendToCopilot(
-  prompt: string,
-  stream: vscode.ChatResponseStream
-): Promise<void> {
-  if (!prompt.trim()) {
-    stream.markdown('Please provide a prompt. Example: `@carbonproxy /send explain JavaScript promises with examples`');
-    return;
-  }
-
-  stream.progress('Running memory pipeline and sending to Copilot...');
-
-  try {
-    const sessionId = getProjectSessionId();
-    const result = await chatWithMemory(sessionId, prompt);
-    const optimized = (result.optimized_prompt ?? result.compressed_prompt ?? prompt).trim();
-
-    await vscode.env.clipboard.writeText(optimized);
-
-    try {
-      await vscode.commands.executeCommand('workbench.action.chat.open', {
-        query: optimized,
-      });
-    } catch {
-      await vscode.commands.executeCommand('workbench.action.chat.open');
-    }
-
-    stream.markdown(`**Memory-pipeline prompt sent to Copilot Chat**
-
-- Before: \`${result.tokens_before}\` tokens
-- After: \`${result.tokens_after}\` tokens
-- Savings: \`${result.savings_pct}%\`
-  - Session: \`${sessionId}\`
-
-  Prompt was processed via \`/api/chat\` (memory injected + stored), then optimized text was copied to clipboard as fallback.`);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);
-  }
 }
 
 async function handleFullRequest(
