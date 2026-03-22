@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from layers.gemini_client import call
 from config import MODEL_FLASH, L1_STRIP_PREFIXES, L1_INLINE_NOISE_WORDS
-from metrics import estimate_tokens
+from metrics import estimate_tokens_for_model
 
 COMPRESSION_SYSTEM = """You are a prompt compression engine.
 Rewrite to minimum tokens while FULLY preserving intent.
@@ -203,18 +203,31 @@ def llm_compress(prompt: str) -> str:
         return prompt
 
 
-def compress(prompt: str, use_llm: bool = True) -> dict:
+def compress(
+    prompt: str,
+    use_llm: bool = True,
+    token_model: str = MODEL_FLASH,
+    token_provider: str = "google",
+) -> dict:
     """
     Full pipeline: rule-based pre-pass then optional LLM compression.
 
     Returns:
         {"original", "compressed", "tokens_before", "tokens_after", "savings_pct"}
     """
-    tokens_before = estimate_tokens(prompt)
+    tokens_before = estimate_tokens_for_model(
+        prompt,
+        model=token_model,
+        provider=token_provider,
+    )
     after_rules = rule_based_compress(prompt)
     compressed = llm_compress(after_rules) if use_llm else after_rules
     compressed = _enforce_semantic_safety(prompt, compressed, after_rules)
-    tokens_after = estimate_tokens(compressed)
+    tokens_after = estimate_tokens_for_model(
+        compressed,
+        model=token_model,
+        provider=token_provider,
+    )
     savings_pct = round((1 - tokens_after / tokens_before) * 100) if tokens_before > 0 else 0
 
     return {

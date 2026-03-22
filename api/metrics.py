@@ -57,7 +57,30 @@ def estimate_co2(tokens: int, model: str) -> float:
 
 
 def estimate_tokens(text: str) -> int:
-    return int(len(text.split()) * 1.3)
+    return estimate_tokens_for_model(text)
+
+
+def estimate_tokens_for_model(
+    text: str,
+    model: str = "gemini-2.5-flash",
+    provider: str = "google",
+) -> int:
+    """Estimate tokens using provider SDK tokenizer when available, with safe fallback."""
+    content = (text or "").strip()
+    if not content:
+        return 0
+
+    if provider == "google" and model.startswith("gemini"):
+        try:
+            # Import lazily to avoid module cycles at import time.
+            from layers.gemini_client import count_tokens as gemini_count_tokens
+
+            return gemini_count_tokens(content, model=model)
+        except Exception:
+            pass
+
+    # Fallback heuristic when provider tokenizer is unavailable.
+    return max(1, int(len(content.split()) * 1.3))
 
 
 def estimate_cost_usd(tokens: int, model: str) -> float:

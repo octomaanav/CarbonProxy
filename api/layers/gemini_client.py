@@ -14,6 +14,46 @@ API_KEY = os.getenv('GEMINI_API_KEY')
 _client = genai.Client(api_key=API_KEY)
 
 
+def count_tokens(
+    prompt: str,
+    model: str = MODEL_FLASH,
+    retries: int = 2,
+) -> int:
+    """Count prompt tokens using Gemini's tokenizer endpoint."""
+    text = (prompt or "").strip()
+    if not text:
+        return 0
+
+    for attempt in range(retries):
+        try:
+            response = _client.models.count_tokens(
+                model=model,
+                contents=text,
+            )
+
+            # Handle SDK response variations across versions.
+            for attr in ("total_tokens", "total_token_count", "token_count"):
+                value = getattr(response, attr, None)
+                if isinstance(value, int):
+                    return max(0, value)
+
+            if hasattr(response, "to_dict"):
+                data = response.to_dict()
+                for key in ("total_tokens", "total_token_count", "token_count"):
+                    value = data.get(key)
+                    if isinstance(value, int):
+                        return max(0, value)
+
+            raise RuntimeError("Unexpected Gemini count_tokens response schema")
+
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(2 ** attempt)
+
+    return 0
+
+
 def call(
     prompt: str,
     model: str = MODEL_FLASH,

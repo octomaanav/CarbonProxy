@@ -152,6 +152,43 @@ export async function handleResetSession(): Promise<void> {
   vscode.window.showInformationMessage('CarbonProxy: Session metrics reset.');
 }
 
+export async function handleSetMemorySessionId(): Promise<void> {
+  const config = vscode.workspace.getConfiguration('carbonproxy');
+  const current = config.get<string>('memorySessionId', '').trim();
+
+  const input = await vscode.window.showInputBox({
+    title: 'CarbonProxy: Set Memory Session ID',
+    prompt: 'Set a custom session id for @carbonproxy memory. Leave blank to auto-generate per workspace.',
+    value: current,
+    ignoreFocusOut: true,
+  });
+
+  if (input === undefined) {
+    return;
+  }
+
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+
+  await config.update('memorySessionId', input.trim(), target);
+
+  if (input.trim()) {
+    vscode.window.showInformationMessage(`CarbonProxy: Memory session id set to "${input.trim()}".`);
+  } else {
+    vscode.window.showInformationMessage('CarbonProxy: Memory session id cleared (auto project session will be used).');
+  }
+}
+
+export async function handleClearMemorySessionId(): Promise<void> {
+  const config = vscode.workspace.getConfiguration('carbonproxy');
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await config.update('memorySessionId', '', target);
+  vscode.window.showInformationMessage('CarbonProxy: Memory session id cleared.');
+}
+
 function showResultPanel(data: Awaited<ReturnType<typeof optimizePrompt>>): void {
   const panel = vscode.window.createWebviewPanel(
     'carbonproxyResult',

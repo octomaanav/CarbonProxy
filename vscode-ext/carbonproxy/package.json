@@ -58,6 +58,14 @@
       {
         "command": "carbonproxy.resetSession",
         "title": "CarbonProxy: Reset Session Metrics"
+      },
+      {
+        "command": "carbonproxy.setMemorySessionId",
+        "title": "CarbonProxy: Set Memory Session ID"
+      },
+      {
+        "command": "carbonproxy.clearMemorySessionId",
+        "title": "CarbonProxy: Clear Memory Session ID"
       }
     ],
     "keybindings": [
@@ -85,7 +93,9 @@
         { "command": "carbonproxy.optimize" },
         { "command": "carbonproxy.optimizeForCopilot" },
         { "command": "carbonproxy.showDashboard" },
-        { "command": "carbonproxy.resetSession" }
+        { "command": "carbonproxy.resetSession" },
+        { "command": "carbonproxy.setMemorySessionId" },
+        { "command": "carbonproxy.clearMemorySessionId" }
       ]
     },
     "configuration": {

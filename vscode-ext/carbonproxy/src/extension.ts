@@ -6,6 +6,8 @@ import {
 	handleOptimizeForCopilot,
 	handleShowDashboard,
 	handleResetSession,
+	handleSetMemorySessionId,
+	handleClearMemorySessionId,
 } from './commands';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -30,6 +32,14 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand(
 			'carbonproxy.resetSession',
 			handleResetSession
+		),
+		vscode.commands.registerCommand(
+			'carbonproxy.setMemorySessionId',
+			handleSetMemorySessionId
+		),
+		vscode.commands.registerCommand(
+			'carbonproxy.clearMemorySessionId',
+			handleClearMemorySessionId
 		)
 	);
 

@@ -141,7 +141,7 @@ async function handleFullRequest(
 
 Make sure the backend is running:
 \`\`\`bash
-cd backend && uvicorn main:app --reload --port 8080
+cd api && uvicorn main:app --reload --port 8080
 \`\`\`
 `);
   }
