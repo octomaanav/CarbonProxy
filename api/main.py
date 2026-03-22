@@ -309,8 +309,22 @@ def demo_reset() -> Dict[str, bool]:
     state.total_kwh = 0.0
     state.history = []
     state.cache = []
+    
+    try:
+        from demo_seed import seed_data
+        seed_data(state)
+    except Exception as e:
+        print(f"Demo seed failed: {e}")
+        
     return {"ok": True}
 
+
+# Seed data on startup
+try:
+    from demo_seed import seed_data
+    seed_data(state)
+except Exception as e:
+    print(f"Demo seed failed on startup: {e}")
 
 # ---------------------------------------------------------------------------
 # New dashboard endpoint — rich aggregated data for the web frontend
@@ -360,6 +374,9 @@ def dashboard() -> Dict[str, object]:
     avg_co2 = (state.co2_saved_g / state.requests) if state.requests > 0 else 0
     annual_team_g = round(avg_co2 * 10 * 50 * 250, 2)  # 10 devs, 50 queries/day, 250 days
 
+    # Trees equivalent: a mature tree absorbs ~22kg CO₂/year
+    trees_saved = round(state.co2_saved_g / 22000, 8) if state.co2_saved_g > 0 else 0.0
+
     return {
         "summary": {
             "requests": state.requests,
@@ -370,6 +387,7 @@ def dashboard() -> Dict[str, object]:
             "cache_hits": state.cache_hits,
             "cache_hit_rate": hit_rate,
             "co2_equivalent": co2_to_equivalent(state.co2_saved_g),
+            "trees_saved": trees_saved,
         },
         "energy": {
             "total_kwh": round(state.total_kwh, 8),
