@@ -7,6 +7,7 @@ CarbonProxy AI is a VS Code extension that adds a Copilot Chat participant `@car
 - `@carbonproxy` chat participant for optimized prompt handling
 - Prompt compression preview with `/optimize`
 - Optimize and forward to Copilot Chat with `/send`
+- Full memory-backed chat via `/api/chat` (each prompt/response persisted per project session)
 - Session stats with `/stats` and reset with `/reset`
 - Semantic cache integration with cache-hit metrics
 - Command palette + editor context optimization command
@@ -41,6 +42,7 @@ Keyboard shortcut:
 ## Configuration
 
 - `carbonproxy.backendUrl` (default: `http://localhost:8080`)
+- `carbonproxy.memorySessionId` (optional; if empty, extension auto-generates a project-scoped session id)
 
 ## Backend
 
@@ -56,4 +58,4 @@ The extension expects a backend exposing endpoints including:
 ## Copilot Chat flow
 
 - `@carbonproxy /optimize <your prompt>` → shows compression preview
-- `@carbonproxy /send <your prompt>` → optimizes prompt and opens Copilot Chat with the optimized text
+- `@carbonproxy /send <your prompt>` → runs `/api/chat` (memory inject + save), then opens Copilot Chat with optimized text

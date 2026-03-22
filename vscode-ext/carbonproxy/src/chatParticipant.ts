@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { optimizePrompt, checkCache, storeCache, getMetrics, resetBackendSession } from './api';
+import { createHash } from 'crypto';
+import { optimizePrompt, chatWithMemory, getMetrics, resetBackendSession } from './api';
 import { buildMetricsTable, estimateTokens, co2ToEquivalent } from './metrics';
 import { recordMetric, resetSession, session } from './session';
 import { refreshStatusBar } from './statusBar';
@@ -141,11 +142,12 @@ async function handleOptimizeAndSendToCopilot(
     return;
   }
 
-  stream.progress('Optimizing prompt for Copilot...');
+  stream.progress('Running memory pipeline and sending to Copilot...');
 
   try {
-    const result = await optimizePrompt(prompt);
-    const optimized = (result.optimized_prompt ?? prompt).trim();
+    const sessionId = getProjectSessionId();
+    const result = await chatWithMemory(sessionId, prompt);
+    const optimized = (result.compressed_prompt ?? prompt).trim();
 
     await vscode.env.clipboard.writeText(optimized);
 
@@ -157,13 +159,14 @@ async function handleOptimizeAndSendToCopilot(
       await vscode.commands.executeCommand('workbench.action.chat.open');
     }
 
-    stream.markdown(`**Optimized and sent to Copilot Chat**
+    stream.markdown(`**Memory-pipeline prompt sent to Copilot Chat**
 
 - Before: \`${result.tokens_before}\` tokens
 - After: \`${result.tokens_after}\` tokens
 - Savings: \`${result.savings_pct}%\`
+  - Session: \`${sessionId}\`
 
-The optimized prompt was copied to your clipboard as a fallback.`);
+  Prompt was processed via \`/api/chat\` (memory injected + stored), then optimized text was copied to clipboard as fallback.`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);
@@ -180,48 +183,27 @@ async function handleFullRequest(
     return;
   }
 
-  stream.progress('Checking semantic cache...');
-
-  try {
-    const cacheResult = await checkCache(userPrompt);
-
-    if (cacheResult.hit && cacheResult.cached_response) {
-      const tokensBefore = estimateTokens(userPrompt);
-
-      stream.markdown(cacheResult.cached_response);
-      stream.markdown(
-        buildMetricsTable({
-          cacheHit: true,
-          tokensBefore,
-          tokensAfter: 0,
-          co2G: 0,
-          model: 'cache',
-          savingsPct: 100,
-        })
-      );
-
-      recordMetric({ model: 'cache', co2G: 0, tokensSaved: tokensBefore, cached: true });
-      void refreshStatusBar();
-      return;
-    }
-  } catch {
-    // Non-fatal cache check failure
-  }
-
   if (token.isCancellationRequested) return;
-  stream.progress('Optimizing prompt...');
+  stream.progress('Running full memory pipeline...');
 
   try {
-    const result = await optimizePrompt(userPrompt);
+    const sessionId = getProjectSessionId();
+    const result = await chatWithMemory(sessionId, userPrompt);
 
     if (token.isCancellationRequested) return;
 
-    const responseText = result.response ?? result.cached_response ?? '';
+    const responseText = result.response ?? '';
     stream.markdown(responseText);
+
+    if (result.memory) {
+      stream.markdown(
+        `Memory: used \`${result.memory.chunks_used}\` / \`${result.memory.chunks_available}\` chunks in session \`${sessionId}\`.`
+      );
+    }
 
     stream.markdown(
       buildMetricsTable({
-        cacheHit: false,
+        cacheHit: result.cache_hit ?? false,
         tokensBefore: result.tokens_before,
         tokensAfter: result.tokens_after,
         co2G: result.co2_g ?? 0,
@@ -234,13 +216,9 @@ async function handleFullRequest(
       model: result.model ?? 'unknown',
       co2G: result.co2_g ?? 0,
       tokensSaved: result.tokens_before - result.tokens_after,
-      cached: false,
+      cached: result.cache_hit ?? false,
     });
     void refreshStatusBar();
-
-    if (responseText) {
-      void storeCache(userPrompt, responseText);
-    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stream.markdown(`**CarbonProxy error:** ${msg}
@@ -251,4 +229,24 @@ cd backend && uvicorn main:app --reload --port 8080
 \`\`\`
 `);
   }
+}
+
+function getProjectSessionId(): string {
+  const configured = vscode.workspace
+    .getConfiguration('carbonproxy')
+    .get<string>('memorySessionId', '')
+    .trim();
+
+  if (configured) {
+    return configured;
+  }
+
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) {
+    return 'default';
+  }
+
+  const fsPath = folder.uri.fsPath;
+  const hash = createHash('sha1').update(fsPath).digest('hex').slice(0, 10);
+  return `project:${folder.name}:${hash}`;
 }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 const API_ROUTES = {
   optimize: '/api/optimize',
+  chat: '/api/chat',
   cacheCheck: '/api/cache/check',
   cacheStore: '/api/cache/store',
   metrics: '/api/metrics',
@@ -48,6 +49,30 @@ export interface OptimizeResult {
   model: string;
 }
 
+export interface ChatResult {
+  response: string;
+  original_prompt: string;
+  compressed_prompt?: string;
+  tokens_before: number;
+  tokens_after: number;
+  savings_pct: number;
+  co2_g: number;
+  carbon_saved_g?: number;
+  money_saved_usd?: number;
+  model: string;
+  provider: string;
+  intent: string;
+  route_reason: string;
+  cache_hit: boolean;
+  memory?: {
+    chunks_used: number;
+    chunks_available: number;
+    tokens_injected: number;
+    tokens_saved_by_memory: number;
+    relevant_summaries: string[];
+  };
+}
+
 export interface CacheCheckResult {
   hit: boolean;
   cached_response?: string;
@@ -65,6 +90,9 @@ export interface BackendMetrics {
 
 export const optimizePrompt = (prompt: string) =>
   post<OptimizeResult>(API_ROUTES.optimize, { prompt });
+
+export const chatWithMemory = (sessionId: string, prompt: string) =>
+  post<ChatResult>(API_ROUTES.chat, { session_id: sessionId, prompt });
 
 export const checkCache = (prompt: string) =>
   post<CacheCheckResult>(API_ROUTES.cacheCheck, { prompt });
