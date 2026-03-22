@@ -13,5 +13,18 @@
       ],
       "preLaunchTask": "${defaultBuildTask}"
     }
+    ,
+    {
+      "name": "Run CarbonProxy Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: watch"
+    }
   ]
 }

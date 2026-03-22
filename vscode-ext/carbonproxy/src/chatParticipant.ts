@@ -147,7 +147,7 @@ async function handleOptimizeAndSendToCopilot(
   try {
     const sessionId = getProjectSessionId();
     const result = await chatWithMemory(sessionId, prompt);
-    const optimized = (result.compressed_prompt ?? prompt).trim();
+    const optimized = (result.optimized_prompt ?? result.compressed_prompt ?? prompt).trim();
 
     await vscode.env.clipboard.writeText(optimized);
 
@@ -225,7 +225,7 @@ async function handleFullRequest(
 
 Make sure the backend is running:
 \`\`\`bash
-cd backend && uvicorn main:app --reload --port 8080
+cd api && uvicorn main:app --reload --port 8080
 \`\`\`
 `);
   }

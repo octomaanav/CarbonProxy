@@ -52,6 +52,8 @@ export interface OptimizeResult {
 export interface ChatResult {
   response: string;
   original_prompt: string;
+  unoptimized_prompt?: string;
+  optimized_prompt?: string;
   compressed_prompt?: string;
   tokens_before: number;
   tokens_after: number;
@@ -70,6 +72,8 @@ export interface ChatResult {
     tokens_injected: number;
     tokens_saved_by_memory: number;
     relevant_summaries: string[];
+    injected_context?: string;
+    injection_lines?: string[];
   };
 }
 
@@ -107,4 +111,4 @@ export const resetBackendSession = () =>
   post<{ ok: boolean }>(API_ROUTES.reset, {});
 
 export const checkHealth = () =>
-  get<{ status: string; cache_size: number }>(API_ROUTES.health);
+  get<{ status: string; cache: { total_entries: number; embedding_model: string; threshold: number } }>(API_ROUTES.health);

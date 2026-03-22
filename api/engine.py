@@ -6,8 +6,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from layers import l1, l2, l3, l4, l5, l6
 from layers.gemini_client import call, call_with_history
-from metrics import SessionMetrics, RequestRecord, estimate_tokens, estimate_co2, estimate_cost_usd, format_usd
-from config import DEFAULT_BASELINE_MODEL
+from metrics import SessionMetrics, RequestRecord, estimate_tokens, estimate_tokens_for_model, estimate_co2, estimate_cost_usd, format_usd
+from config import DEFAULT_BASELINE_MODEL, DEFAULT_MODEL
 
 
 class CarbonProxyEngine:
@@ -51,13 +51,14 @@ class CarbonProxyEngine:
                 "route_reason": "none",
             }
 
-        tokens_before = estimate_tokens(prompt)
+        # For cache checks (before routing), use default model tokenizer.
+        tokens_before = estimate_tokens_for_model(prompt, model=DEFAULT_MODEL, provider="google")
 
         if use_cache:
             cache_result = l3.check(prompt)
             if cache_result["hit"]:
                 response = cache_result["response"]
-                tokens_used = estimate_tokens(response)
+                tokens_used = estimate_tokens_for_model(response, model=DEFAULT_MODEL, provider="google")
                 self.session.record(
                     RequestRecord(
                         model="cache",
@@ -97,7 +98,12 @@ class CarbonProxyEngine:
         provider = route_result.get("provider", "google")
         intent = route_result.get("intent", "default")
 
-        compression_result = l1.compress(prompt, use_llm=True)
+        compression_result = l1.compress(
+            prompt,
+            use_llm=True,
+            token_model=model,
+            token_provider=provider,
+        )
         compressed_prompt = compression_result["compressed"]
         tokens_after_compression = compression_result["tokens_after"]  # Capture BEFORE constraints
         savings_pct = compression_result["savings_pct"]
@@ -135,7 +141,11 @@ class CarbonProxyEngine:
                 temperature=0.2,
             )
 
-        tokens_used = tokens_after_compression + estimate_tokens(response)
+        tokens_used = tokens_after_compression + estimate_tokens_for_model(
+            response,
+            model=model,
+            provider=provider,
+        )
         co2_g = estimate_co2(tokens_used, model)
         tokens_saved = max(0, tokens_before - tokens_after_compression)
         carbon_saved_g = estimate_co2(tokens_saved, model)

@@ -17,7 +17,7 @@ from demo_seed import SEED_DATA
 
 from ecostack.memory_store import (
     init_db, get_conn, get_chunks, append_chunk,
-    chunk_exists, delete_session, log_carbon, get_total_chunks,
+    chunk_exists, delete_session, log_carbon, log_request, get_total_chunks,
 )
 from ecostack.embeddings import embed_query, embed_document
 from ecostack.similarity import find_relevant_chunks
@@ -158,7 +158,50 @@ def cache_check(body: PromptRequest) -> dict:
 
 @app.get("/api/metrics")
 def metrics() -> dict:
-    return engine.metrics()
+    runtime = engine.metrics()
+
+    with get_conn() as conn:
+        agg = conn.execute("""
+            SELECT
+                COUNT(*) AS requests,
+                COALESCE(SUM(tokens_saved_compression + tokens_saved_memory), 0) AS tokens_saved,
+                COALESCE(SUM(co2_avoided), 0) AS co2_saved_g,
+                COALESCE(SUM(cache_hit), 0) AS cache_hits
+            FROM request_log
+        """).fetchone()
+
+        history_rows = conn.execute("""
+            SELECT
+                model,
+                tokens_before,
+                tokens_after,
+                tokens_after AS tokens_used,
+                co2_consumed AS co2_g,
+                cache_hit AS cached,
+                timestamp
+            FROM request_log
+            ORDER BY timestamp DESC
+            LIMIT 50
+        """).fetchall()
+
+    db_requests = int(agg["requests"] or 0)
+    if db_requests == 0:
+        return runtime
+
+    cache_hits = int(agg["cache_hits"] or 0)
+    co2_saved_g = float(agg["co2_saved_g"] or 0.0)
+    tokens_saved = int(agg["tokens_saved"] or 0)
+    hit_rate = round((cache_hits / db_requests) * 100, 2) if db_requests > 0 else 0
+
+    return {
+        "requests": db_requests,
+        "tokens_saved": tokens_saved,
+        "co2_saved_g": co2_saved_g,
+        "cache_hits": cache_hits,
+        "cache_hit_rate_pct": hit_rate,
+        "co2_equivalent": runtime.get("co2_equivalent", "n/a"),
+        "history": [dict(r) for r in history_rows],
+    }
 
 
 @app.post("/api/demo/reset")
@@ -182,7 +225,7 @@ def chat(body: ChatRequest) -> dict:
 
     Just send { "session_id": "...", "prompt": "..." } and everything is automatic.
     """
-    original_prompt = body.prompt
+    original_prompt = body.prompt.strip()
 
     # ── Step 1: Inject relevant memory context ────────────────
     memory_info = {"chunks_used": 0, "chunks_available": 0,
@@ -191,7 +234,7 @@ def chat(body: ChatRequest) -> dict:
 
     chunks = get_chunks(body.session_id)
     if chunks:
-        query_emb = embed_query(body.prompt)
+        query_emb = embed_query(original_prompt)
         if query_emb is not None:
             relevant = find_relevant_chunks(query_emb, chunks)
             injected_context = "\n".join(f"[Memory] {c['summary']}" for c in relevant)
@@ -208,9 +251,9 @@ def chat(body: ChatRequest) -> dict:
             }
 
     # Prepend memory context to the prompt if we have any
-    enriched_prompt = body.prompt
+    enriched_prompt = original_prompt
     if memory_info["injected_context"]:
-        enriched_prompt = memory_info["injected_context"] + "\n\n" + body.prompt
+        enriched_prompt = memory_info["injected_context"] + "\n\n" + original_prompt
 
     # ── Step 2: Run through engine (compress → route → call) ──
     try:
@@ -227,9 +270,17 @@ def chat(body: ChatRequest) -> dict:
 
     response_text = result.get("response", "")
     model_used = result.get("model", "unknown")
+    provider = result.get("provider", "unknown")
+    intent = result.get("intent", "default")
+    route_reason = result.get("route_reason", "")
+    optimized_prompt = result.get("compressed_prompt", enriched_prompt)
     tokens_before = result.get("tokens_before", 0)
     tokens_after = result.get("tokens_after", 0)
     tokens_saved_by_compression = max(0, tokens_before - tokens_after)
+    tokens_saved_by_memory = memory_info["tokens_saved"]
+    total_tokens_saved = tokens_saved_by_compression + tokens_saved_by_memory
+    co2_consumed = float(result.get("co2_g", 0.0) or 0.0)
+    co2_avoided = float(result.get("carbon_saved_g", 0.0) or 0.0)
 
     # ── Step 3: Save exchange to memory (non-blocking) ────────
     save_result = {"status": "skipped", "summary": "", "id": "", "tokens": 0}
@@ -238,30 +289,56 @@ def chat(body: ChatRequest) -> dict:
             save_result = _save_background(
                 session_id=body.session_id,
                 prompt=original_prompt,
+                optimized_prompt=optimized_prompt,
                 response=response_text,
                 model=model_used,
                 tokens_sent=tokens_after,
-                tokens_saved=tokens_saved_by_compression + memory_info["tokens_saved"],
+                tokens_saved=total_tokens_saved,
+                co2_consumed=co2_consumed,
+                co2_avoided=co2_avoided,
             )
         except Exception as e:
             print(f"[chat] Memory save failed: {e}")
+
+    try:
+        log_request(
+            session_id=body.session_id,
+            original_prompt=original_prompt,
+            optimized_prompt=optimized_prompt,
+            response=response_text,
+            model=model_used,
+            provider=provider,
+            intent=intent,
+            route_reason=route_reason,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after,
+            tokens_saved_compression=tokens_saved_by_compression,
+            tokens_saved_memory=tokens_saved_by_memory,
+            cache_hit=bool(result.get("cache_hit", False)),
+            co2_consumed=co2_consumed,
+            co2_avoided=co2_avoided,
+        )
+    except Exception as e:
+        print(f"[chat] Request log failed: {e}")
 
     return {
         # ── Response ──
         "response": response_text,
         "original_prompt": original_prompt,
+        "unoptimized_prompt": original_prompt,
+        "optimized_prompt": optimized_prompt,
 
         # ── Model routing ──
         "model": model_used,
-        "provider": result.get("provider", "unknown"),
-        "intent": result.get("intent", "default"),
-        "route_reason": result.get("route_reason", ""),
+        "provider": provider,
+        "intent": intent,
+        "route_reason": route_reason,
 
         # ── Compression stats ──
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,
         "savings_pct": result.get("savings_pct", 0),
-        "compressed_prompt": result.get("compressed_prompt", enriched_prompt),
+        "compressed_prompt": optimized_prompt,
 
         # ── Memory layer stats ──
         "memory": {
@@ -270,6 +347,8 @@ def chat(body: ChatRequest) -> dict:
             "tokens_injected": memory_info["tokens_injected"],
             "tokens_saved_by_memory": memory_info["tokens_saved"],
             "relevant_summaries": memory_info["relevant_summaries"],
+            "injected_context": memory_info["injected_context"],
+            "injection_lines": [f"[Memory] {s}" for s in memory_info["relevant_summaries"]],
             "saved_chunk": save_result,
         },
 
@@ -333,10 +412,13 @@ def memory_inject(body: InjectRequest) -> InjectResponse:
 def _save_background(
     session_id: str,
     prompt: str,
+    optimized_prompt: str,
     response: str,
     model: str,
     tokens_sent: int,
     tokens_saved: int,
+    co2_consumed: Optional[float] = None,
+    co2_avoided: Optional[float] = None,
 ) -> dict:
     """Background task: summarize, embed, store chunk, log carbon."""
     summary = summarize_exchange(prompt, response)
@@ -367,6 +449,7 @@ def _save_background(
         "id": chunk_id,
         "summary": summary,
         "prompt": prompt,
+        "optimized_prompt": optimized_prompt,
         "response": response,
         "embedding": embedding,
         "tokens": token_count,
@@ -380,7 +463,11 @@ def _save_background(
 
     # Carbon logging
     try:
-        co2_consumed, co2_avoided = estimate_carbon(model, tokens_sent, tokens_saved)
+        if co2_consumed is None or co2_avoided is None:
+            if model == "cache":
+                co2_consumed, co2_avoided = (0.0, 0.0)
+            else:
+                co2_consumed, co2_avoided = estimate_carbon(model, tokens_sent, tokens_saved)
         log_carbon(
             session_id=session_id,
             model=model,
@@ -409,6 +496,7 @@ def memory_save(body: SaveRequest, background_tasks: BackgroundTasks) -> SaveRes
     result = _save_background(
         session_id=body.session_id,
         prompt=body.prompt,
+        optimized_prompt=body.optimized_prompt or body.prompt,
         response=body.response,
         model=body.model,
         tokens_sent=body.tokens_sent,
@@ -426,12 +514,38 @@ def memory_stats(session_id: str) -> SessionStats:
             (session_id,)
         ).fetchall()
 
+        req_totals = conn.execute("""
+            SELECT
+                COUNT(*) AS total_requests,
+                COALESCE(SUM(tokens_before), 0) AS total_tokens_before,
+                COALESCE(SUM(tokens_after), 0) AS total_tokens_after,
+                COALESCE(SUM(tokens_saved_compression + tokens_saved_memory), 0) AS total_tokens_saved,
+                COALESCE(SUM(co2_avoided), 0) AS total_co2_avoided_g
+            FROM request_log
+            WHERE session_id = ?
+        """, (session_id,)).fetchone()
+
+        req_recent = conn.execute("""
+            SELECT original_prompt, optimized_prompt
+            FROM request_log
+            WHERE session_id = ?
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """, (session_id,)).fetchall()
+
     chunks = [dict(r) for r in rows]
     return SessionStats(
         session_id=session_id,
         total_chunks=len(chunks),
         total_tokens_stored=sum(c["tokens"] for c in chunks),
+        total_requests=int(req_totals["total_requests"] or 0),
+        total_tokens_before=int(req_totals["total_tokens_before"] or 0),
+        total_tokens_after=int(req_totals["total_tokens_after"] or 0),
+        total_tokens_saved=int(req_totals["total_tokens_saved"] or 0),
+        total_co2_avoided_g=round(float(req_totals["total_co2_avoided_g"] or 0.0), 6),
         recent_summaries=[c["summary"] for c in chunks[-5:]],
+        recent_original_prompts=[r["original_prompt"] for r in req_recent],
+        recent_optimized_prompts=[r["optimized_prompt"] for r in req_recent],
         oldest_chunk=chunks[0]["timestamp"] if chunks else None,
         newest_chunk=chunks[-1]["timestamp"] if chunks else None,
     )
@@ -443,7 +557,7 @@ def memory_dashboard() -> DashboardResponse:
     with get_conn() as conn:
         # Recent chunks
         all_chunks = conn.execute("""
-            SELECT session_id, summary, tokens, timestamp
+            SELECT session_id, summary, tokens, timestamp, prompt, optimized_prompt, response
             FROM memory_chunks
             ORDER BY timestamp DESC
         """).fetchall()
@@ -451,13 +565,50 @@ def memory_dashboard() -> DashboardResponse:
         # Per-session stats
         sessions = conn.execute("""
             SELECT
-                session_id,
-                COUNT(*)         AS chunk_count,
-                SUM(tokens)      AS tokens_stored,
-                MIN(timestamp)   AS first_seen,
-                MAX(timestamp)   AS last_seen
-            FROM memory_chunks
-            GROUP BY session_id
+                m.session_id AS session_id,
+                m.chunk_count AS chunk_count,
+                m.tokens_stored AS tokens_stored,
+                m.first_seen AS first_seen,
+                m.last_seen AS last_seen,
+                COALESCE(r.requests, 0) AS requests,
+                COALESCE(r.tokens_saved, 0) AS tokens_saved,
+                COALESCE(r.co2_avoided_g, 0) AS co2_avoided_g,
+                COALESCE(r.last_original_prompt, '') AS last_original_prompt,
+                COALESCE(r.last_optimized_prompt, '') AS last_optimized_prompt
+            FROM (
+                SELECT
+                    session_id,
+                    COUNT(*)       AS chunk_count,
+                    SUM(tokens)    AS tokens_stored,
+                    MIN(timestamp) AS first_seen,
+                    MAX(timestamp) AS last_seen
+                FROM memory_chunks
+                GROUP BY session_id
+            ) AS m
+            LEFT JOIN (
+                SELECT
+                    rl.session_id AS session_id,
+                    COUNT(*) AS requests,
+                    SUM(tokens_saved_compression + tokens_saved_memory) AS tokens_saved,
+                    SUM(co2_avoided) AS co2_avoided_g,
+                    (
+                        SELECT r2.original_prompt
+                        FROM request_log r2
+                        WHERE r2.session_id = rl.session_id
+                        ORDER BY r2.timestamp DESC
+                        LIMIT 1
+                    ) AS last_original_prompt,
+                    (
+                        SELECT r3.optimized_prompt
+                        FROM request_log r3
+                        WHERE r3.session_id = rl.session_id
+                        ORDER BY r3.timestamp DESC
+                        LIMIT 1
+                    ) AS last_optimized_prompt
+                FROM request_log rl
+                GROUP BY rl.session_id
+            ) AS r
+            ON m.session_id = r.session_id
             ORDER BY last_seen DESC
         """).fetchall()
 
@@ -472,8 +623,8 @@ def memory_dashboard() -> DashboardResponse:
             SELECT
                 COALESCE(SUM(co2_consumed), 0) AS total_consumed,
                 COALESCE(SUM(co2_avoided), 0)  AS total_avoided,
-                COALESCE(SUM(tokens_saved), 0) AS total_tokens_saved
-            FROM carbon_log
+                COALESCE(SUM(tokens_saved_compression + tokens_saved_memory), 0) AS total_tokens_saved
+            FROM request_log
         """).fetchone()
 
     total_consumed = carbon["total_consumed"]
@@ -493,8 +644,13 @@ def memory_dashboard() -> DashboardResponse:
                 session_id=s["session_id"],
                 chunk_count=s["chunk_count"],
                 tokens_stored=s["tokens_stored"],
+                requests=int(s["requests"] or 0),
+                tokens_saved=int(s["tokens_saved"] or 0),
+                co2_avoided_g=round(float(s["co2_avoided_g"] or 0.0), 6),
                 first_seen=s["first_seen"],
                 last_seen=s["last_seen"],
+                last_original_prompt=s["last_original_prompt"],
+                last_optimized_prompt=s["last_optimized_prompt"],
             )
             for s in sessions
         ],
@@ -502,6 +658,9 @@ def memory_dashboard() -> DashboardResponse:
             RecentChunk(
                 session_id=c["session_id"],
                 summary=c["summary"],
+                original_prompt=c["prompt"],
+                optimized_prompt=c["optimized_prompt"],
+                response=c["response"],
                 tokens=c["tokens"],
                 timestamp=c["timestamp"],
             )
