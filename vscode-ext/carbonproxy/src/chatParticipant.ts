@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { optimizePrompt, checkCache, storeCache, getMetrics, resetBackendSession } from './api';
+import { createHash } from 'crypto';
+import { chatWithMemory, getMetrics, resetBackendSession } from './api';
 import { buildMetricsTable, estimateTokens, co2ToEquivalent } from './metrics';
 import { recordMetric, resetSession, session } from './session';
 import { refreshStatusBar } from './statusBar';
@@ -35,10 +36,6 @@ async function handleRequest(
 
   if (command === 'reset') {
     return handleResetCommand(stream);
-  }
-
-  if (command === 'optimize') {
-    return handlePreviewOptimize(prompt, stream);
   }
 
   return handleFullRequest(prompt, stream, token);
@@ -92,42 +89,6 @@ async function handleResetCommand(
   stream.markdown('Session metrics have been reset to zero. Ready for a fresh demo.');
 }
 
-async function handlePreviewOptimize(
-  prompt: string,
-  stream: vscode.ChatResponseStream
-): Promise<void> {
-  if (!prompt.trim()) {
-    stream.markdown('Please provide a prompt to preview. Example: `@carbonproxy /optimize explain how TCP works`');
-    return;
-  }
-
-  stream.progress('Compressing prompt...');
-
-  try {
-    const result = await optimizePrompt(prompt);
-    stream.markdown(`**Prompt compression preview**
-
-**Before** (${result.tokens_before} tokens):
-\`\`\`
-${result.original_prompt}
-\`\`\`
-
-**After** (${result.tokens_after} tokens — ${result.savings_pct}% smaller):
-\`\`\`
-${result.optimized_prompt}
-\`\`\`
-
-Model that would be selected: \`${result.model}\`
-Estimated CO₂ if sent: \`${(result.co2_g ?? 0).toFixed(5)}g\`
-
-*Run without \`/optimize\` to get the actual response.*
-`);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    stream.markdown(`**Error:** ${msg}. Is the CarbonProxy backend running?`);
-  }
-}
-
 async function handleFullRequest(
   userPrompt: string,
   stream: vscode.ChatResponseStream,
@@ -138,48 +99,27 @@ async function handleFullRequest(
     return;
   }
 
-  stream.progress('Checking semantic cache...');
-
-  try {
-    const cacheResult = await checkCache(userPrompt);
-
-    if (cacheResult.hit && cacheResult.cached_response) {
-      const tokensBefore = estimateTokens(userPrompt);
-
-      stream.markdown(cacheResult.cached_response);
-      stream.markdown(
-        buildMetricsTable({
-          cacheHit: true,
-          tokensBefore,
-          tokensAfter: 0,
-          co2G: 0,
-          model: 'cache',
-          savingsPct: 100,
-        })
-      );
-
-      recordMetric({ model: 'cache', co2G: 0, tokensSaved: tokensBefore, cached: true });
-      void refreshStatusBar();
-      return;
-    }
-  } catch {
-    // Non-fatal cache check failure
-  }
-
   if (token.isCancellationRequested) return;
-  stream.progress('Optimizing prompt...');
+  stream.progress('Running full memory pipeline...');
 
   try {
-    const result = await optimizePrompt(userPrompt);
+    const sessionId = getProjectSessionId();
+    const result = await chatWithMemory(sessionId, userPrompt);
 
     if (token.isCancellationRequested) return;
 
-    const responseText = result.response ?? result.cached_response ?? '';
+    const responseText = result.response ?? '';
     stream.markdown(responseText);
+
+    if (result.memory) {
+      stream.markdown(
+        `Memory: used \`${result.memory.chunks_used}\` / \`${result.memory.chunks_available}\` chunks in session \`${sessionId}\`.`
+      );
+    }
 
     stream.markdown(
       buildMetricsTable({
-        cacheHit: false,
+        cacheHit: result.cache_hit ?? false,
         tokensBefore: result.tokens_before,
         tokensAfter: result.tokens_after,
         co2G: result.co2_g ?? 0,
@@ -192,21 +132,37 @@ async function handleFullRequest(
       model: result.model ?? 'unknown',
       co2G: result.co2_g ?? 0,
       tokensSaved: result.tokens_before - result.tokens_after,
-      cached: false,
+      cached: result.cache_hit ?? false,
     });
     void refreshStatusBar();
-
-    if (responseText) {
-      void storeCache(userPrompt, responseText);
-    }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     stream.markdown(`**CarbonProxy error:** ${msg}
 
 Make sure the backend is running:
 \`\`\`bash
-cd backend && uvicorn main:app --reload --port 8080
+cd api && uvicorn main:app --reload --port 8080
 \`\`\`
 `);
   }
+}
+
+function getProjectSessionId(): string {
+  const configured = vscode.workspace
+    .getConfiguration('carbonproxy')
+    .get<string>('memorySessionId', '')
+    .trim();
+
+  if (configured) {
+    return configured;
+  }
+
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) {
+    return 'default';
+  }
+
+  const fsPath = folder.uri.fsPath;
+  const hash = createHash('sha1').update(fsPath).digest('hex').slice(0, 10);
+  return `project:${folder.name}:${hash}`;
 }

@@ -32,6 +32,10 @@
             "description": "Preview prompt compression without calling LLM"
           },
           {
+            "name": "send",
+            "description": "Optimize prompt and open Copilot Chat with optimized text"
+          },
+          {
             "name": "reset",
             "description": "Reset session metrics to zero"
           }
@@ -44,12 +48,24 @@
         "title": "CarbonProxy: Optimize Selection"
       },
       {
+        "command": "carbonproxy.optimizeForCopilot",
+        "title": "CarbonProxy: Optimize Prompt for Copilot"
+      },
+      {
         "command": "carbonproxy.showDashboard",
         "title": "CarbonProxy: Open Web Dashboard"
       },
       {
         "command": "carbonproxy.resetSession",
         "title": "CarbonProxy: Reset Session Metrics"
+      },
+      {
+        "command": "carbonproxy.setMemorySessionId",
+        "title": "CarbonProxy: Set Memory Session ID"
+      },
+      {
+        "command": "carbonproxy.clearMemorySessionId",
+        "title": "CarbonProxy: Clear Memory Session ID"
       }
     ],
     "keybindings": [
@@ -66,12 +82,20 @@
           "command": "carbonproxy.optimize",
           "when": "editorHasSelection",
           "group": "carbonproxy@1"
+        },
+        {
+          "command": "carbonproxy.optimizeForCopilot",
+          "when": "editorHasSelection",
+          "group": "carbonproxy@2"
         }
       ],
       "commandPalette": [
         { "command": "carbonproxy.optimize" },
+        { "command": "carbonproxy.optimizeForCopilot" },
         { "command": "carbonproxy.showDashboard" },
-        { "command": "carbonproxy.resetSession" }
+        { "command": "carbonproxy.resetSession" },
+        { "command": "carbonproxy.setMemorySessionId" },
+        { "command": "carbonproxy.clearMemorySessionId" }
       ]
     },
     "configuration": {
@@ -81,6 +105,11 @@
           "type": "string",
           "default": "http://localhost:8080",
           "description": "URL of the CarbonProxy FastAPI backend"
+        },
+        "carbonproxy.memorySessionId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional fixed memory session id. Leave empty to auto-generate per project workspace."
         }
       }
     }

@@ -3,8 +3,11 @@ import { initStatusBar } from './statusBar';
 import { registerChatParticipant } from './chatParticipant';
 import {
 	handleOptimizeCommand,
+	handleOptimizeForCopilot,
 	handleShowDashboard,
 	handleResetSession,
+	handleSetMemorySessionId,
+	handleClearMemorySessionId,
 } from './commands';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -19,12 +22,24 @@ export function activate(context: vscode.ExtensionContext): void {
 			handleOptimizeCommand
 		),
 		vscode.commands.registerCommand(
+			'carbonproxy.optimizeForCopilot',
+			handleOptimizeForCopilot
+		),
+		vscode.commands.registerCommand(
 			'carbonproxy.showDashboard',
 			handleShowDashboard
 		),
 		vscode.commands.registerCommand(
 			'carbonproxy.resetSession',
 			handleResetSession
+		),
+		vscode.commands.registerCommand(
+			'carbonproxy.setMemorySessionId',
+			handleSetMemorySessionId
+		),
+		vscode.commands.registerCommand(
+			'carbonproxy.clearMemorySessionId',
+			handleClearMemorySessionId
 		)
 	);
 

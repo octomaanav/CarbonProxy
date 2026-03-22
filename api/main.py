@@ -1,4 +1,8 @@
-from __future__ import annotations
+import sys
+import os
+import json
+import hashlib
+from datetime import datetime, timezone
 
 import time
 from collections import Counter
@@ -10,6 +14,39 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
+from fastapi.responses import JSONResponse
+
+from engine import CarbonProxyEngine
+from demo_seed import SEED_DATA
+
+from ecostack.memory_store import (
+    init_db, get_conn, get_chunks, append_chunk,
+    chunk_exists, delete_session, log_carbon, log_request, get_total_chunks,
+)
+from ecostack.embeddings import embed_query, embed_document
+from ecostack.similarity import find_relevant_chunks
+from ecostack.summarizer import summarize_exchange
+from ecostack.carbon import estimate_carbon
+from ecostack.models import (
+    InjectRequest, InjectResponse,
+    SaveRequest, SaveResponse,
+    SessionStats, DashboardResponse, DashboardSummary,
+    SessionRow, RecentChunk, CarbonSummary,
+    DeleteResponse, HealthResponse,
+)
+
+# ── App ───────────────────────────────────────────────────────
+
+app = FastAPI(title="CarbonProxy API", version="0.2.0")
+engine = CarbonProxyEngine()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +155,13 @@ class CacheStoreRequest(BaseModel):
     response: str
 
 
-class CacheRecord(BaseModel):
-    prompt: str
-    response: str
+# ── Startup ───────────────────────────────────────────────────
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
+    if SEED_DATA:
+        engine.warm_cache(SEED_DATA)
 
 
 # ---------------------------------------------------------------------------
@@ -268,16 +309,44 @@ def optimize(body: PromptRequest) -> Dict[str, object]:
     state.history.append(entry)
 
     return {
-        "original_prompt": prompt,
-        "optimized_prompt": optimized_prompt,
-        "tokens_before": tokens_before,
-        "tokens_after": tokens_after,
-        "savings_pct": savings_pct,
-        "cache_hit": False,
-        "cached_response": None,
-        "response": response,
-        "co2_g": co2_g,
-        "model": model,
+        "original_prompt": body.prompt,
+        "optimized_prompt": result.get("compressed_prompt", body.prompt),
+        "tokens_before": result.get("tokens_before", 0),
+        "tokens_after": result.get("tokens_after", 0),
+        "savings_pct": result.get("savings_pct", 0),
+        "cache_hit": result.get("cache_hit", False),
+        "cached_response": result.get("cached_response"),
+        "response": result.get("response", ""),
+        "co2_g": result.get("co2_g", 0.0),
+        "carbon_saved_g": result.get("carbon_saved_g", 0.0),
+        "money_saved_usd": result.get("money_saved_usd", 0.0),
+        "money_saved_display": result.get("money_saved_display", "$0.00000000"),
+        "baseline_model": result.get("baseline_model", "gpt-4o-mini"),
+        "actual_cost_usd": result.get("actual_cost_usd", 0.0),
+        "baseline_cost_usd": result.get("baseline_cost_usd", 0.0),
+        "money_saved_vs_baseline_usd": result.get("money_saved_vs_baseline_usd", 0.0),
+        "model": result.get("model", "unknown"),
+        "provider": result.get("provider", "unknown"),
+        "intent": result.get("intent", "default"),
+        "route_reason": result.get("route_reason", ""),
+        "similarity": result.get("similarity", 0.0),
+    }
+
+
+@app.post("/api/cache/store")
+def cache_store(body: CacheStoreRequest) -> dict:
+    engine.cache_store(body.prompt, body.response)
+    return {"stored": True}
+
+
+@app.post("/api/cache/check")
+def cache_check(body: PromptRequest) -> dict:
+    result = engine.cache_check(body.prompt)
+    return {
+        "hit": result.get("hit", False),
+        "cached_response": result.get("response"),
+        "similarity": result.get("similarity", 0.0),
+        "matched_prompt": result.get("matched_prompt"),
     }
 
 
