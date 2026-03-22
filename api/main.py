@@ -18,7 +18,10 @@ from typing import Optional
 from fastapi.responses import JSONResponse
 
 from engine import CarbonProxyEngine
-from demo_seed import SEED_DATA
+try:
+    from demo_seed import SEED_DATA
+except ImportError:
+    SEED_DATA = []
 
 from ecostack.memory_store import (
     init_db, get_conn, get_chunks, append_chunk,
@@ -155,6 +158,11 @@ class CacheStoreRequest(BaseModel):
     response: str
 
 
+class ChatRequest(BaseModel):
+    session_id: str
+    prompt: str
+
+
 # ── Startup ───────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -179,6 +187,12 @@ class HistoryEntry:
     cost_usd: float
     kwh: float
     prompt_preview: str
+
+
+@dataclass
+class CacheRecord:
+    prompt: str
+    response: str
 
 
 @dataclass
@@ -268,6 +282,7 @@ def cache_store(body: CacheStoreRequest) -> Dict[str, bool]:
 @app.post("/api/optimize")
 def optimize(body: PromptRequest) -> Dict[str, object]:
     prompt = body.prompt.strip()
+    result = engine.complete(prompt=prompt)
 
     tokens_before = estimate_tokens(prompt)
     optimized_prompt = compress_prompt(prompt)
@@ -330,6 +345,40 @@ def optimize(body: PromptRequest) -> Dict[str, object]:
         "intent": result.get("intent", "default"),
         "route_reason": result.get("route_reason", ""),
         "similarity": result.get("similarity", 0.0),
+    }
+
+
+@app.post("/api/chat")
+def chat(body: ChatRequest) -> Dict[str, object]:
+    prompt = body.prompt.strip()
+    result = engine.complete(prompt=prompt, use_cache=False)
+
+    return {
+        "response": result.get("response", ""),
+        "original_prompt": body.prompt,
+        "unoptimized_prompt": body.prompt,
+        "optimized_prompt": result.get("compressed_prompt", body.prompt),
+        "compressed_prompt": result.get("compressed_prompt", body.prompt),
+        "tokens_before": result.get("tokens_before", 0),
+        "tokens_after": result.get("tokens_after", 0),
+        "savings_pct": result.get("savings_pct", 0),
+        "co2_g": result.get("co2_g", 0.0),
+        "carbon_saved_g": result.get("carbon_saved_g", 0.0),
+        "money_saved_usd": result.get("money_saved_usd", 0.0),
+        "model": result.get("model", "unknown"),
+        "provider": result.get("provider", "unknown"),
+        "intent": result.get("intent", "default"),
+        "route_reason": result.get("route_reason", ""),
+        "cache_hit": result.get("cache_hit", False),
+        "memory": {
+            "chunks_used": 0,
+            "chunks_available": 0,
+            "tokens_injected": 0,
+            "tokens_saved_by_memory": 0,
+            "relevant_summaries": [],
+            "injected_context": "",
+            "injection_lines": [],
+        },
     }
 
 

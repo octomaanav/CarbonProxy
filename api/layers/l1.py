@@ -14,7 +14,7 @@ Remove: filler, politeness, hedging, role preambles,
         apologies, redundant restatements, meta-instructions.
 
 NEVER remove:
-- JSON schemas, field names, or data structures
+- JSON schemas, field names, or  data structures
 - Specific numbers, IDs, or technical values
 - Negative constraints ("do not use X", "without Y")
 - Action verbs that define the task (review vs design vs implement)
@@ -47,6 +47,7 @@ def _extract_action_verbs(text: str) -> set[str]:
     lower = text.lower()
     verbs = set()
 
+    # 1. Directive context: "need to X", "can you X", etc.
     directive_matches = re.findall(
         r"\b(?:need to|want to|must|should|please|can you|could you|to)\s+([a-z]+)\b",
         lower,
@@ -55,12 +56,27 @@ def _extract_action_verbs(text: str) -> set[str]:
         if verb in ACTION_VERBS:
             verbs.add(verb)
 
+    # 2. Imperative/start of line: "review this", "Write code"
     imperative_matches = re.findall(
         r"(?:^|[\.!?]\s+|\n)\s*([a-z]+)\b",
         lower,
     )
     for verb in imperative_matches:
         if verb in ACTION_VERBS:
+            verbs.add(verb)
+
+    # 3. General label context: after ":" or "-" (e.g., "filter: ...", "- review ...")
+    label_matches = re.findall(
+        r"(?::|,|-|;)\s*([a-z]+)\b",
+        lower,
+    )
+    for verb in label_matches:
+        if verb in ACTION_VERBS:
+            verbs.add(verb)
+
+    # 4. Simple occurrence of action verb as standalone word (more lenient)
+    for verb in ACTION_VERBS:
+        if re.search(rf"\b{verb}\b", lower):
             verbs.add(verb)
 
     return verbs
@@ -192,14 +208,22 @@ def rule_based_compress(prompt: str) -> str:
 def llm_compress(prompt: str) -> str:
     """LLM compression via Gemini Flash. Always compress for max savings."""
     try:
-        return call(
+        import sys
+        print(f"[L1] Calling Gemini with prompt: {prompt[:50]}...", file=sys.stderr)
+        result = call(
             prompt=prompt,
             model=MODEL_FLASH,
             system=COMPRESSION_SYSTEM,
             max_tokens=300,
             temperature=0.1,
         )
-    except Exception:
+        print(f"[L1] Gemini returned: {result[:50]}...", file=sys.stderr)
+        return result
+    except Exception as e:
+        import sys
+        import traceback
+        print(f"[L1 LLM_COMPRESS ERROR] {type(e).__name__}: {str(e)}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return prompt
 
 
