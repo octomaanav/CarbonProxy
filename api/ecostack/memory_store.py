@@ -24,6 +24,8 @@ def init_db() -> None:
                 id          TEXT PRIMARY KEY,
                 session_id  TEXT NOT NULL,
                 summary     TEXT NOT NULL,
+                prompt      TEXT NOT NULL DEFAULT '',
+                response    TEXT NOT NULL DEFAULT '',
                 embedding   TEXT NOT NULL,
                 tokens      INTEGER NOT NULL,
                 timestamp   TEXT NOT NULL
@@ -59,6 +61,8 @@ def get_chunks(session_id: str) -> list[dict]:
         {
             "id":        row["id"],
             "summary":   row["summary"],
+            "prompt":    row["prompt"],
+            "response":  row["response"],
             "embedding": json.loads(row["embedding"]),
             "tokens":    row["tokens"],
             "timestamp": row["timestamp"],
@@ -83,12 +87,14 @@ def append_chunk(session_id: str, chunk: dict) -> None:
     with get_conn() as conn:
         conn.execute(
             """INSERT OR IGNORE INTO memory_chunks
-               (id, session_id, summary, embedding, tokens, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (id, session_id, summary, prompt, response, embedding, tokens, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 chunk["id"],
                 session_id,
                 chunk["summary"],
+                chunk.get("prompt", ""),
+                chunk.get("response", ""),
                 json.dumps(chunk["embedding"]),
                 chunk["tokens"],
                 chunk["timestamp"],
